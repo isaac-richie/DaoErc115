@@ -1,0 +1,110 @@
+/ SPDX-License-Identifier: MIT
+pragma solidity ^0.8.9;
+
+import "@openzeppelin/contracts/token/ERC1155/ERC1155.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/security/Pausable.sol";
+import "@openzeppelin/contracts/token/ERC1155/extensions/ERC1155Supply.sol";
+import "@openzeppelin/contracts/utils/Strings.sol";//thus allows us to convert numbers to strings
+import "@openzeppelin/contracts/finance/PaymentSplitter.sol";
+
+contract PotatoezBuilders3 is ERC1155, Ownable, Pausable, ERC1155Supply, PaymentSplitter {
+    uint256 public PublicPrice = 0.1 ether;
+    uint256 public allowListPrice = 0.05 ether;
+    uint256 public maxSupply = 100;
+    uint256 public maxPerWallet = 5;
+
+    bool public allowListMintOpen = false;
+    bool public publicMintOpen = false;
+    
+    mapping(address => bool) allowList;
+    mapping(address => uint256) purchasesPerWallet; //keeping tract of the amount of tokens minted
+
+    constructor(
+        address[] memory _payees,
+        uint256[] memory _shares
+    ) 
+        ERC1155("token Uri")//current uri
+        PaymentSplitter(_payees, _shares)
+    {}
+
+    function setURI(string memory newuri) public onlyOwner { //access to change our uri
+        _setURI(newuri);
+    }
+
+    function pause() public onlyOwner {
+        _pause();
+    }
+
+    function unpause() public onlyOwner {
+        _unpause();
+    }
+    
+    function editMintWindows(
+        bool _allowListMintOpen,
+        bool _publicMintOpen
+    )external onlyOwner {
+        allowListMintOpen = _allowListMintOpen;
+        publicMintOpen = _publicMintOpen;
+    }
+
+
+    function allowListMint(uint256 id, uint256 amount) public payable {
+        require(allowListMintOpen, "its over");
+        require(allowList[msg.sender],"you are nit whitelisted");
+        require(msg.value == allowListPrice * amount, "insufficient funds");
+        mint(id , amount);
+        
+    }
+
+
+    function publicMint (uint256 id, uint256 amount)
+        public payable
+    {   
+        require(publicMintOpen, "ended");
+        require(msg.value == PublicPrice * amount, "insufficient funds"); //setting a require to accept funds before minting
+        mint(id, amount);
+    }
+    
+
+    function mint(uint256 id, uint256 amount) internal {
+         require(purchasesPerWallet[msg.sender] + amount <= maxPerWallet, "wallet limit");
+         require(id < 2, "minting the wrong nft anon");
+         require(totalSupply(id) + amount <= maxSupply, "sold out");//minting the id should not be more than maxsupply
+        _mint(msg.sender, id, amount, "");
+        purchasesPerWallet[msg.sender] += amount;
+    }
+    function uri(uint256 _id) public view virtual override returns (string memory) {
+        require(exists(_id), "Uri: doesnt exist");
+
+        return string(abi.encodePacked(super.uri(_id), Strings.toString(_id), ".json"));//abi encodedpac combines strings together
+    }
+
+    function mintBatch(address to, uint256[] memory ids, uint256[] memory amounts, bytes memory data)
+        public
+        onlyOwner
+    {
+        _mintBatch(to, ids, amounts, data);
+    }
+
+   //function to set the allowlist
+
+      function setAllowList(address[] calldata addresses) external onlyOwner {
+        for(uint256 i = 0; i < addresses.length; i++){
+            allowList[addresses[i]] = true;
+        }
+    }
+  //function to withdraw
+    function withdraw (address _addr) external onlyOwner {
+        uint balance = address(this).balance;//getting the balance of the smart contract
+        payable(_addr).transfer(balance);//transfer the funds to the address
+    }
+
+    function _beforeTokenTransfer(address operator, address from, address to, uint256[] memory ids, uint256[] memory amounts, bytes memory data)
+        internal
+        whenNotPaused
+        override(ERC1155, ERC1155Supply)
+    {
+        super._beforeTokenTransfer(operator, from, to, ids, amounts, data);
+    }
+}
